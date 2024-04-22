@@ -3,7 +3,7 @@
 2) Go to Settings https://app.mymeet.ai/settings
 3) You will see section with your unique API key and Docs button
 ![изображение](https://github.com/MyMeetAI/API-Docs/assets/23313519/7b72261c-b4d3-462e-a6cf-1412df19b786)
-4) You can try some requests from Swagger UI
+4) You can try some requests from [Swagger UI](https://backend.mymeet.ai/docs/)
 
 # API methods
 ## Record online-meeting
