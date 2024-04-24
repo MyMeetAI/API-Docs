@@ -65,6 +65,15 @@ def get_meetings_list():
     print(response.text)
 
 
+def get_meeting_status():
+    params = {
+        'api_key': API_KEY,
+        'meeting_id': "MEETING_ID"
+    }
+    response = requests.get(URL + "/api/meeting/status", params=params)
+    print(response.text)
+
+
 def get_meeting_json():
     params = {
         'api_key': API_KEY,
