@@ -46,8 +46,7 @@ def upload_file():
 
             # Send the chunk as part of the request
             files = {'file': chunk}
-            response = requests.post(
-                URL + "/api/video", data=data, files=files)
+            response = requests.post(URL + "/api/video", data=data, files=files)
             response.raise_for_status()
 
             print(response.text)
