@@ -32,9 +32,9 @@ Here is sample code to upload file and process meeting:
 file_path = "PATH_TO_FILE"
 id = str(uuid.uuid4())
 file_size = os.path.getsize(file_path)
+chunk_size = 20 * 1024 * 1024  # 20 MB chunk size
 total_chunks = math.ceil(file_size / chunk_size)
 with open(file_path, 'rb') as file:
-    chunk_size = 20 * 1024 * 1024  # 20 MB chunk size
     chunk_number = 0
     while True:
         chunk = file.read(chunk_size)
