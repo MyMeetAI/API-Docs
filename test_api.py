@@ -11,6 +11,7 @@ def record_meeting():
     payload = {
         'api_key': API_KEY,
         'link': 'https://meet.google.com/zyj-qrmk-gvo',
+        'meeting_password': '', # Meeting password (optional)
         # UTC DateTime of meeting in cron format. To record NOW meeting leave it empty
         'cron': '30 12 25 4 *',
         'local_date_time': '2024-04-25T15:30:00+03:00',  # Local DateTime of meeting
