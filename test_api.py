@@ -8,6 +8,7 @@ import math
 API_KEY = "YOUR_API_KEY"  # See https://app.mymeet.ai/settings
 URL = "https://backend.mymeet.ai"
 
+
 class TemplateType(Enum):
     DEFAULT = "default-meeting"
     SALES = "sales-meeting"
@@ -20,6 +21,7 @@ class TemplateType(Enum):
     ONE_TO_ONE = "one-to-one"
     PROTOCOL = "protocol"
     MEDICINE = "medicine"
+
 
 class EntityType(Enum):
     SUMMARY = "summary"
@@ -39,11 +41,11 @@ class EntityType(Enum):
 
 def record_meeting():
     url = URL + "/api/record-meeting"
-    
+
     payload = {
         'api_key': API_KEY,
         'link': 'https://meet.google.com/zyj-qrmk-gvo',
-        'meeting_password': '', # Meeting password (optional)
+        'meeting_password': '',  # Meeting password (optional)
         # UTC DateTime of meeting in cron format. To record NOW meeting leave it empty
         'cron': '30 12 25 4 *',
         'local_date_time': '2024-04-25T15:30:00+03:00',  # Local DateTime of meeting
@@ -87,7 +89,8 @@ def upload_file():
 
             # Send the chunk as part of the request
             files = {'file': chunk}
-            response = requests.post(URL + "/api/video", data=data, files=files)
+            response = requests.post(
+                URL + "/api/video", data=data, files=files)
             response.raise_for_status()
 
             print(response.text)
@@ -100,7 +103,6 @@ def get_meetings_list():
         'api_key': API_KEY,
         'page': 0,
         'perPage': 10,
-        'search': 'MEETING_TITLE'
     }
     response = requests.get(URL + "/api/storage/list", params=params)
     print(response.text)
@@ -146,7 +148,7 @@ def download_meeting():
 
 def generate_new_template():
     url = URL + '/api/generate-new-template'
-    
+
     data = {
         'api_key': API_KEY,
         'meeting_id': 'MEETING_ID',
@@ -159,7 +161,7 @@ def generate_new_template():
 
 def clear_transcript():
     url = URL + '/api/clear-transcript'
-    
+
     data = {
         'api_key': API_KEY,
         'meeting_id': 'MEETING_ID'
@@ -171,7 +173,7 @@ def clear_transcript():
 
 def undo_clear_transcript():
     url = URL + '/api/undo-clear-transcript'
-    
+
     data = {
         'api_key': API_KEY,
         'meeting_id': 'MEETING_ID'
@@ -183,7 +185,7 @@ def undo_clear_transcript():
 
 def rename_meeting():
     url = URL + '/api/meeting'
-    
+
     data = {
         'api_key': API_KEY,
         'meetingId': 'MEETING_ID',
@@ -197,7 +199,7 @@ def rename_meeting():
 def update_meeting_summary():
     meeting_id = 'MEETING_ID'
     url = f'{URL}/api/meeting/{meeting_id}/summary'
-    
+
     data = {
         'api_key': API_KEY,
         'templateName': TemplateType.DEFAULT.value,
