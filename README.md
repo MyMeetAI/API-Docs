@@ -1,15 +1,20 @@
 # Pre-requirements
-1) Register account on https://app.mymeet.ai/
-2) Go to Settings https://app.mymeet.ai/settings
-3) You will see section with your unique API key and Docs button
-![изображение](https://github.com/MyMeetAI/API-Docs/assets/23313519/7b72261c-b4d3-462e-a6cf-1412df19b786)
-4) You can try some requests from [Swagger UI](https://backend.mymeet.ai/docs/)
+
+1. Register account on https://app.mymeet.ai/
+2. Go to Settings https://app.mymeet.ai/settings
+3. You will see section with your unique API key and Docs button
+   ![изображение](https://github.com/MyMeetAI/API-Docs/assets/23313519/7b72261c-b4d3-462e-a6cf-1412df19b786)
+4. You can try some requests from [Swagger UI](https://backend.mymeet.ai/docs/)
 
 # API methods
+
 Example code on Python [here](https://github.com/MyMeetAI/API-Docs/blob/main/test_api.py).
+
 ## Record online-meeting
+
 Now we support recording meeting from Google Meet, Zoom, Yandex.Telemost and SberJazz.
 Here is sample code to record your online meeting and process after it finished:
+
 ```
 payload = {
     'api_key': API_KEY,
@@ -24,11 +29,14 @@ payload = {
 response = requests.post("https://backend.mymeet.ai/api/record-meeting", json=payload)
 print(response.text)
 ```
+
 NOTE: More info about [cron](https://docs.oracle.com/cd/E12058_01/doc/doc.1014/e12030/cron_expressions.htm).
 
 ## Upload file
-We support different video and audio formats. 
+
+We support different video and audio formats.
 Here is sample code to upload file and process meeting:
+
 ```
 file_path = "PATH_TO_FILE"
 id = str(uuid.uuid4())
@@ -63,6 +71,7 @@ with open(file_path, 'rb') as file:
 ```
 
 ## Get meeting list
+
 ```
 params = {
     'api_key': API_KEY,
@@ -74,6 +83,7 @@ print(response.text)
 ```
 
 ## Get meeting status
+
 ```
 params = {
     'api_key': API_KEY,
@@ -84,6 +94,7 @@ print(response.text)
 ```
 
 ## Get meeting JSON
+
 ```
 params = {
     'api_key': API_KEY,
@@ -94,6 +105,7 @@ print(response.text)
 ```
 
 ## Download followup
+
 ```
 type = 'pdf'  # Available values : pdf, md, json, docx
 params = {
@@ -109,4 +121,79 @@ if response.status_code == 200:
     print("File downloaded successfully")
 else:
     print("Failed to download file:", response.text)
+```
+
+## Generate new template
+
+```
+url = URL + '/api/generate-new-template'
+
+data = {
+    'api_key': API_KEY,
+    'meeting_id': 'MEETING_ID',
+    'template_name': 'default-meeting',
+}
+
+response = requests.post(url, data=data)
+print(response.text)
+```
+
+## Clear transcript
+
+```
+url = URL + '/api/clear-transcript'
+
+data = {
+    'api_key': API_KEY,
+    'meeting_id': 'MEETING_ID'
+}
+
+response = requests.post(url, data=data)
+print(response.text)
+```
+
+## Undo clear transcript
+
+```
+url = URL + '/api/undo-clear-transcript'
+
+data = {
+    'api_key': API_KEY,
+    'meeting_id': 'MEETING_ID'
+}
+
+response = requests.post(url, data=data)
+print(response.text)
+```
+
+## Rename meeting
+
+```
+url = URL + '/api/meeting'
+
+data = {
+    'api_key': API_KEY,
+    'meetingId': 'MEETING_ID',
+    'newName': 'New Meeting Title'
+}
+
+response = requests.put(url, data=data)
+print(response.text)
+```
+
+## Update meeting summary
+
+```
+meeting_id = 'MEETING_ID'
+url = f'{URL}/api/meeting/{meeting_id}/summary'
+
+data = {
+    'api_key': API_KEY,
+    'templateName': TemplateType.DEFAULT.value,
+    'entityName': EntityType.SUMMARY.value,
+    'newSummaryText': 'Updated summary text for the meeting'
+}
+
+response = requests.put(url, data=data)
+print(response.text)
 ```
