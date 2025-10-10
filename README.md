@@ -68,7 +68,7 @@ with open(file_path, 'rb') as file:
         chunk_number += 1
 ```
 
-## Get meeting list
+## Get meeting list DEPRECATED!!! Gives only old meetings. Use approach bellow
 
 ```
 params = {
@@ -77,6 +77,18 @@ params = {
     'perPage': 10
 }
 response = requests.get("https://backend.mymeet.ai/api/storage/list", params=params)
+print(response.text)
+```
+
+## Use this istead
+## Get meeting list
+```
+params = {
+    'api_key': API_KEY,
+    'page': 0,
+    'perPage': 10
+}
+response = requests.get("http://backend.mymeet.ai/api/workspaces/active/all-meetings", params=params)
 print(response.text)
 ```
 
