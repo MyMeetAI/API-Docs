@@ -88,7 +88,7 @@ params = {
     'page': 0,
     'perPage': 10
 }
-response = requests.get("http://backend.mymeet.ai/api/workspaces/active/all-meetings", params=params)
+response = requests.get("https://backend.mymeet.ai/api/workspaces/active/all-meetings", params=params)
 print(response.text)
 ```
 
