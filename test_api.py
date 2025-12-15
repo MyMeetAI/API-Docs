@@ -98,16 +98,6 @@ def upload_file():
             chunk_number += 1
 
 
-def get_meetings_list():
-    params = {
-        'api_key': API_KEY,
-        'page': 0,
-        'perPage': 10,
-    }
-    response = requests.get(URL + "/api/storage/list", params=params)
-    print(response.text)
-
-
 def get_meeting_status():
     params = {
         'api_key': API_KEY,
@@ -209,3 +199,4 @@ def update_meeting_summary():
 
     response = requests.put(url, data=data)
     print(response.text)
+
