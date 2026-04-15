@@ -10,9 +10,9 @@ Example code on Python [here](https://github.com/MyMeetAI/API-Docs/blob/main/tes
 
 # MCP server
 
-[https://github.com/mymeet-ai-first-company/mymeet-mcp-server](url)
+https://github.com/mymeet-ai-first-company/mymeet-mcp-server
 
-[https://mcp.mymeet.ai](url)
+https://mcp.mymeet.ai
 
 
 ## Record online-meeting
