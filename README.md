@@ -8,6 +8,12 @@
 
 Example code on Python [here](https://github.com/MyMeetAI/API-Docs/blob/main/test_api.py).
 
+# MCP server
+
+[https://github.com/mymeet-ai-first-company/mymeet-mcp-server](url)
+[https://mcp.mymeet.ai](url)
+
+
 ## Record online-meeting
 
 Now we support recording meeting from Google Meet, Zoom, Yandex.Telemost and SberJazz.
