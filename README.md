@@ -87,7 +87,7 @@ Instead of polling `GET /api/meeting/status`, pass an optional `webhook_url`
 mymeet sends a POST notification to your URL and you fetch the report with
 `GET /api/video/report` as usual.
 
-A minimal receiver example (Flask) is available at
+A minimal receiver example (FastAPI) is available at
 [`examples/webhook_receiver.py`](examples/webhook_receiver.py).
 
 ### Step 0 — prepare an endpoint
@@ -95,29 +95,31 @@ A minimal receiver example (Flask) is available at
 Expose an HTTPS endpoint on a public address that accepts `POST` with a JSON
 body and responds `2xx` quickly (under 10s). Private/internal addresses
 (`localhost`, `10.x`, `192.168.x`, cloud metadata, docker hostnames) are
-rejected with `400`. Minimal Flask receiver:
+rejected with `400`. Minimal FastAPI receiver
+(`pip install fastapi uvicorn`, run: `uvicorn webhook_receiver:app`):
 
 ```python
 import hashlib, hmac, time
-from flask import Flask, request
+from fastapi import FastAPI, Request, Response
 
-app = Flask(__name__)
+app = FastAPI()
 SECRET = "YOUR_WEBHOOK_SECRET"  # the same value you passed as webhook_secret
 
 @app.post("/mymeet-webhook")
-def hook():
-    ts = request.headers.get("X-Mymeet-Timestamp", "")
-    signature = request.headers.get("X-Mymeet-Signature", "")
+async def hook(request: Request):
+    raw_body = await request.body()
+    ts = request.headers.get("x-mymeet-timestamp", "")
+    signature = request.headers.get("x-mymeet-signature", "")
     expected = "sha256=" + hmac.new(
-        SECRET.encode(), f"{ts}.".encode() + request.get_data(), hashlib.sha256
+        SECRET.encode(), f"{ts}.".encode() + raw_body, hashlib.sha256
     ).hexdigest()
     if not hmac.compare_digest(signature, expected):
-        return "bad signature", 401
+        return Response("bad signature", status_code=401)
     if abs(time.time() - int(ts)) > 300:  # anti-replay: reject timestamps older than 5 min
-        return "stale timestamp", 401
-    event = request.get_json()
+        return Response("stale timestamp", status_code=401)
+    event = await request.json()
     print(event["event"], event["meeting_id"], event["data"])
-    return "", 200
+    return Response(status_code=200)
 ```
 
 ### Step 1 — pass the URL when creating a meeting
