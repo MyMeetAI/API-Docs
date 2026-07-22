@@ -178,8 +178,10 @@ Timeout 10s; any `2xx` counts as delivered. On connection errors, timeouts,
 `5xx`, `408` or `429` mymeet retries up to 5 times (~1m, 5m, 15m, 1h, 3h, with
 jitter); other `4xx` are not retried. Delivery is **at-least-once**: after a
 manual restart of a failed meeting you may receive `meeting.failed` and later
-`meeting.completed` — deduplicate by `meeting_id` + `event`. Webhooks are not
-available for `cron` schedules yet (`400`).
+`meeting.completed` — deduplicate by `meeting_id` + `event`. For `cron`
+schedules every firing produces its own meeting and sends its own notification
+with that meeting's `meeting_id`; deleting the schedule stops the
+notifications.
 
 ## Get meeting list DEPRECATED!!! Gives only old meetings. Use approach bellow
 
