@@ -1,83 +1,158 @@
-# Pre-requirements
+# mymeet.ai API
 
-1. Register account on https://app.mymeet.ai/
-2. API is only available for B2B clients. Contact [sales team](https://mymeet.ai/contact) to get your API key.
-3. You can try some requests from [Swagger UI](https://backend.mymeet.ai/docs/)
+**English** | [Русский](README.ru.md)
 
-# API methods
+Official documentation and code samples for the [mymeet.ai](https://mymeet.ai) public API:
+send a bot to record online meetings, upload audio/video files, and fetch AI-generated
+reports, transcripts and followups.
 
-Example code on Python [here](https://github.com/MyMeetAI/API-Docs/blob/main/test_api.py).
+- 📘 Full interactive API reference: https://backend.mymeet.ai/docs/
+- 🐍 Python snippets for every endpoint: [`test_api.py`](test_api.py)
+- 🔔 Webhook receiver example: [`examples/webhook_receiver.py`](examples/webhook_receiver.py)
 
-# MCP server
+## Getting started
 
-https://github.com/MyMeetAI/mymeet-mcp-server
+1. Register an account at https://app.mymeet.ai/
+2. The API is available for B2B clients — contact the [sales team](https://mymeet.ai/contact) to get your API key.
+3. Explore and try requests in the interactive reference: https://backend.mymeet.ai/docs/
 
-https://mcp.mymeet.ai
+## Authentication
 
+Send your API key in the `X-API-KEY` HTTP header on **every** request:
 
-## Record online-meeting
+```python
+import requests
 
-Now we support recording meeting from Google Meet, Zoom, Yandex.Telemost and SberJazz.
-Here is sample code to record your online meeting and process after it finished:
+API_KEY = "YOUR_API_KEY"
+headers = {"X-API-KEY": API_KEY}
 
-```
-payload = {
-    'api_key': API_KEY,
-    'link': 'https://meet.google.com/zyj-qrmk-gvo',
-    'meeting_password': '', # Meeting password (optional)
-    # UTC DateTime of meeting in cron format. To record NOW meeting leave it empty
-    'cron': '30 12 25 4 *',
-    'local_date_time': '2024-04-25T15:30:00+03:00',  # Local DateTime of meeting
-    'title': 'Daily sync',
-    'source': 'gmeet',  # [gmeet, zoom, yandextelemost, sberjazz]
-    'webhook_url': 'https://example.com/mymeet-webhook',  # optional: get notified when the report is ready, see Webhooks below
-    'webhook_secret': 'YOUR_WEBHOOK_SECRET_16_128',        # optional: sign notifications
-}
-response = requests.post("https://backend.mymeet.ai/api/record-meeting", json=payload)
+response = requests.get(
+    "https://backend.mymeet.ai/api/meeting/status",
+    params={"meeting_id": "MEETING_ID"},
+    headers=headers,
+)
 print(response.text)
 ```
 
-NOTE: More info about [cron](https://docs.oracle.com/cd/E12058_01/doc/doc.1014/e12030/cron_expressions.htm).
+> ⚠️ The `X-API-KEY` header is the only supported way to pass the key.
+> Passing it as an `api_key` query parameter or body field is a legacy
+> mechanism that does **not** work with current-format keys and returns
+> `401 Unauthorized`.
+
+## MCP server
+
+- https://github.com/MyMeetAI/mymeet-mcp-server
+- https://mcp.mymeet.ai
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| POST | [`/api/record-meeting`](#record-online-meeting) | Send a bot to record an online meeting |
+| POST | [`/api/video`](#upload-file) | Upload an audio/video file |
+| GET | [`/api/workspaces/active/all-meetings`](#get-meeting-list) | List meetings in the workspace |
+| GET | [`/api/meeting/status`](#get-meeting-status) | Meeting status (single or batch) |
+| GET | [`/api/video/report`](#get-meeting-json) | Full meeting report as JSON |
+| DELETE | [`/api/video/report`](#delete-meeting) | Delete a meeting |
+| GET | [`/api/storage/download`](#download-followup) | Download the followup (pdf / md / json / docx) |
+| POST | [`/api/generate-new-template`](#generate-new-template) | Apply another report template to a meeting |
+| POST | [`/api/clear-transcript`](#clear-transcript) | Clear the meeting transcript |
+| POST | [`/api/undo-clear-transcript`](#undo-clear-transcript) | Restore a cleared transcript |
+| PUT | [`/api/meeting`](#rename-meeting) | Rename a meeting |
+| PUT | [`/api/meeting/{meetingId}/summary`](#update-meeting-summary) | Edit a summary block of the report |
+
+## Record online-meeting
+
+`POST /api/record-meeting`
+
+Supported platforms (`source`): `gmeet`, `zoom`, `yandextelemost`, `sberjazz`,
+`trueconf`, `konturtalk`, `msteams`, `jitsi`, `mtslink`, `lark`.
+
+```python
+payload = {
+    'link': 'https://meet.google.com/zyj-qrmk-gvo',
+    'meeting_password': '',                          # optional
+    'local_date_time': '2026-04-25T15:30:00+03:00',  # local datetime of the meeting
+    'title': 'Daily sync',
+    'source': 'gmeet',
+    'template_name': 'default-meeting',              # see Templates below
+    # Schedule for later — UTC cron, numeric one-shot values only
+    # ('minute hour day month *', no '*'/lists in the first four fields,
+    # at most 3 months ahead). Omit to record right now:
+    # 'cron': '30 12 25 4 *',
+    # 'participants': 'a@example.com, b@example.com', # optional: followup recipients
+    'webhook_url': 'https://example.com/mymeet-webhook',  # optional, see Webhooks
+    'webhook_secret': 'YOUR_WEBHOOK_SECRET_16_128',       # optional, see Webhooks
+}
+response = requests.post("https://backend.mymeet.ai/api/record-meeting",
+                         json=payload, headers=headers)
+print(response.text)
+```
+
+Responses: `200` OK, `401` unauthorized, `402` minutes limit is over,
+`409` meeting already scheduled.
 
 ## Upload file
 
-We support different video and audio formats.
-Here is sample code to upload file and process meeting:
+`POST /api/video`
 
-```
+We support the common video and audio formats. Upload the file in zero-based
+data chunks, then send **one empty finalize marker** — `chunk_total` includes
+that marker. The finalize response returns the `meeting_id`.
+
+```python
+import math, os, uuid
+
 file_path = "PATH_TO_FILE"
-id = str(uuid.uuid4())
+file_id = str(uuid.uuid4())
+file_name = os.path.basename(file_path)
 file_size = os.path.getsize(file_path)
-chunk_size = 20 * 1024 * 1024  # 20 MB chunk size
-total_chunks = math.ceil(file_size / chunk_size)
-with open(file_path, 'rb') as file:
-    chunk_number = 0
-    while True:
-        chunk = file.read(chunk_size)
-        if not chunk:
-            break  # Reached EOF
+chunk_size = 20 * 1024 * 1024  # 20 MB per data chunk
+data_chunks = max(1, math.ceil(file_size / chunk_size))
 
-        # Construct the request parameters
-        data = {
-            'api_key': API_KEY,
-            'id': id,
-            'chunk_number': chunk_number,
-            'chunk_total': total_chunks,
-            'filename': os.path.basename(file_path),
-            'localTime': '2024-04-25T15:30:00+03:00',  # Local DateTime
-            'webhook_url': 'https://example.com/mymeet-webhook',  # optional: get notified when the report is ready, see Webhooks below
-            'webhook_secret': 'YOUR_WEBHOOK_SECRET_16_128',        # optional: sign notifications
-        }
+common = {
+    'id': file_id,
+    'chunk_total': data_chunks + 1,   # + one empty finalize marker
+    'filename': file_name,
+    'template_name': 'default-meeting',              # see Templates below
+    'localTime': '2026-04-25T15:30:00+03:00',        # optional
+    'title': 'Meeting Upload',                       # optional
+    'speakers_number': 0,                            # optional, 0 = auto
+    # Optional retry/integrity fields:
+    # 'upload_session_id': str(uuid.uuid4()),  # new value per full upload attempt
+    # 'expected_file_size': file_size,
+    # 'expected_sha256': '<sha256-of-the-file>',
+    'webhook_url': 'https://example.com/mymeet-webhook',  # optional, see Webhooks
+    'webhook_secret': 'YOUR_WEBHOOK_SECRET_16_128',       # optional, see Webhooks
+}
 
-        # Send the chunk as part of the request
-        files = {'file': chunk}
-        response = requests.post("https://backend.mymeet.ai/api/video", data=data, files=files)
+with open(file_path, 'rb') as f:
+    for chunk_number in range(data_chunks):  # zero-based data chunks
+        chunk = f.read(chunk_size)
+        data = dict(common, chunk_number=chunk_number)
+        files = {'file': (file_name, chunk, 'application/octet-stream')}
+        response = requests.post("https://backend.mymeet.ai/api/video",
+                                 data=data, files=files, headers=headers)
         response.raise_for_status()
+        print(f"Chunk {chunk_number + 1}/{data_chunks} uploaded")
 
-        print(response.text)
-
-        chunk_number += 1
+# Empty finalize marker: the server validates the upload and returns meeting_id
+data = dict(common, chunk_number=data_chunks)
+files = {'file': (file_name, b'', 'application/octet-stream')}
+response = requests.post("https://backend.mymeet.ai/api/video",
+                         data=data, files=files, headers=headers)
+print(response.json())  # {"meeting_id": ..., "user_id": ...}
 ```
+
+Notes:
+
+- A single-request upload is `chunk_number=0` with `chunk_total=1`.
+  Uploads that send data in the final request (`chunk_total` = number of data
+  chunks, no empty marker) are also supported.
+- For reliable retries keep `id` stable for the recording and generate a new
+  `upload_session_id` for every full upload attempt.
+- Supplying `expected_file_size` / `expected_sha256` enables end-to-end
+  integrity validation before a meeting is created.
 
 ## Webhooks
 
@@ -126,6 +201,10 @@ async def hook(request: Request):
 
 See the `webhook_url` / `webhook_secret` fields in the [Record online-meeting](#record-online-meeting)
 and [Upload file](#upload-file) samples above.
+
+You can also set a default Webhook URL in your API integration settings — it
+is used whenever `webhook_url` is omitted in the request; an explicit value in
+the request takes priority.
 
 ### Step 2 — receive notifications
 
@@ -184,65 +263,85 @@ its own notification; the whole series shares the schedule's `meeting_id`
 (the one returned by the scheduling request), each firing's report replacing
 the previous one.
 
-## Get meeting list DEPRECATED!!! Gives only old meetings. Use approach bellow
-
-```
-params = {
-    'api_key': API_KEY,
-    'page': 0,
-    'perPage': 10
-}
-response = requests.get("https://backend.mymeet.ai/api/storage/list", params=params)
-print(response.text)
-```
-
-## Use this istead
 ## Get meeting list
-```
+
+`GET /api/workspaces/active/all-meetings`
+
+Returns a paginated list of meetings for the authenticated workspace.
+
+```python
 params = {
-    'api_key': API_KEY,
-    'page': 0,
-    'perPage': 10
+    'page': 0,      # page index, starts from 0
+    'perPage': 10,  # meetings per page
 }
-response = requests.get("https://backend.mymeet.ai/api/workspaces/active/all-meetings", params=params)
+response = requests.get("https://backend.mymeet.ai/api/workspaces/active/all-meetings",
+                        params=params, headers=headers)
 print(response.text)
 ```
 
 ## Get meeting status
 
-```
-params = {
-    'api_key': API_KEY,
-    'meeting_id': "MEETING_ID"
-}
-response = requests.get("https://backend.mymeet.ai/api/meeting/status", params=params)
+`GET /api/meeting/status`
+
+Pass either `meeting_id` (single meeting, plain-text response) or
+`meeting_ids` (up to 100 comma-separated ids, JSON response) — when both are
+present, `meeting_ids` wins.
+
+```python
+# Single meeting (plain-text response)
+params = {'meeting_id': "MEETING_ID"}
+response = requests.get("https://backend.mymeet.ai/api/meeting/status",
+                        params=params, headers=headers)
 print(response.text)
+
+# Batch (JSON response)
+params = {'meeting_ids': "MEETING_ID_1,MEETING_ID_2"}
+response = requests.get("https://backend.mymeet.ai/api/meeting/status",
+                        params=params, headers=headers)
+print(response.json())
 ```
 
 ## Get meeting JSON
 
+`GET /api/video/report`
+
+Returns the full meeting report (transcript, speakers, chapters, templates)
+as JSON.
+
+```python
+params = {'meeting_id': "MEETING_ID"}
+response = requests.get("https://backend.mymeet.ai/api/video/report",
+                        params=params, headers=headers)
+print(response.json())
 ```
-params = {
-    'api_key': API_KEY,
-    'meeting_id': "MEETING_ID"
-}
-response = requests.get("https://backend.mymeet.ai/api/video/report", params=params)
-print(response.text)
+
+## Delete meeting
+
+`DELETE /api/video/report`
+
+```python
+params = {'meeting_id': "MEETING_ID"}
+response = requests.delete("https://backend.mymeet.ai/api/video/report",
+                           params=params, headers=headers)
+print(response.status_code)
 ```
 
 ## Download followup
 
-```
-type = 'pdf'  # Available values : pdf, md, json, docx
+`GET /api/storage/download`
+
+```python
+file_format = 'pdf'  # available values: pdf, md, json, docx
 params = {
-    'api_key': API_KEY,
     'meeting_id': "MEETING_ID",
-    'format': type
+    'format': file_format,
+    'timezone': 'UTC',                    # optional
+    # 'template_name': 'default-meeting', # optional
 }
-response = requests.get("https://backend.mymeet.ai/api/storage/download", params=params)
+response = requests.get("https://backend.mymeet.ai/api/storage/download",
+                        params=params, headers=headers)
 if response.status_code == 200:
-    # Save file
-    with open(f'downloaded_file.{type}', 'wb') as file:
+    with open(f'downloaded_file.{file_format}', 'wb') as file:
         file.write(response.content)
     print("File downloaded successfully")
 else:
@@ -251,75 +350,93 @@ else:
 
 ## Generate new template
 
-```
-url = URL + '/api/generate-new-template'
+`POST /api/generate-new-template`
 
-data = {
-    'api_key': API_KEY,
+Applies another report template to an already processed meeting. The response
+includes `created_template_id` — use it as `templateId` in
+[Update meeting summary](#update-meeting-summary).
+
+```python
+payload = {
     'meeting_id': 'MEETING_ID',
-    'template_name': 'default-meeting',
+    'template_name': 'sales-meeting',  # see Templates below
 }
-
-response = requests.post(url, data=data)
-print(response.text)
+response = requests.post("https://backend.mymeet.ai/api/generate-new-template",
+                         json=payload, headers=headers)
+print(response.json())  # {"followup": {...}, "created_template_id": "..."}
 ```
 
 ## Clear transcript
 
-```
-url = URL + '/api/clear-transcript'
+`POST /api/clear-transcript`
 
-data = {
-    'api_key': API_KEY,
-    'meeting_id': 'MEETING_ID'
-}
-
-response = requests.post(url, data=data)
-print(response.text)
+```python
+payload = {'meeting_id': 'MEETING_ID'}
+response = requests.post("https://backend.mymeet.ai/api/clear-transcript",
+                         json=payload, headers=headers)
+print(response.status_code)
 ```
 
 ## Undo clear transcript
 
-```
-url = URL + '/api/undo-clear-transcript'
+`POST /api/undo-clear-transcript`
 
-data = {
-    'api_key': API_KEY,
-    'meeting_id': 'MEETING_ID'
-}
-
-response = requests.post(url, data=data)
-print(response.text)
+```python
+payload = {'meeting_id': 'MEETING_ID'}
+response = requests.post("https://backend.mymeet.ai/api/undo-clear-transcript",
+                         json=payload, headers=headers)
+print(response.status_code)
 ```
 
 ## Rename meeting
 
-```
-url = URL + '/api/meeting'
+`PUT /api/meeting`
 
-data = {
-    'api_key': API_KEY,
+```python
+payload = {
     'meetingId': 'MEETING_ID',
-    'newName': 'New Meeting Title'
+    'newName': 'New Meeting Title',
 }
-
-response = requests.put(url, data=data)
-print(response.text)
+response = requests.put("https://backend.mymeet.ai/api/meeting",
+                        json=payload, headers=headers)
+print(response.status_code)
 ```
 
 ## Update meeting summary
 
-```
+`PUT /api/meeting/{meetingId}/summary`
+
+`templateId` is the unique id of the applied template instance: take it from
+`created_template_id` returned by [Generate new template](#generate-new-template),
+or from the `followup_v2.templates[].id` field of the
+[meeting report](#get-meeting-json).
+
+```python
 meeting_id = 'MEETING_ID'
-url = f'{URL}/api/meeting/{meeting_id}/summary'
-
-data = {
-    'api_key': API_KEY,
-    'templateName': TemplateType.DEFAULT.value,
-    'entityName': EntityType.SUMMARY.value,
-    'newSummaryText': 'Updated summary text for the meeting'
+payload = {
+    'templateId': 'TEMPLATE_ID',
+    'entityName': 'summary',  # see Entities below
+    'newSummaryText': 'Updated summary text for the meeting',
 }
-
-response = requests.put(url, data=data)
-print(response.text)
+response = requests.put(f"https://backend.mymeet.ai/api/meeting/{meeting_id}/summary",
+                        json=payload, headers=headers)
+print(response.status_code)
 ```
+
+## Templates
+
+`template_name` values — the template defines the structure and style of the
+report:
+
+`default-meeting`, `sales-meeting`, `sales-coaching`, `hr-interview`,
+`research-interview`, `team-sync`, `article`, `lecture-notes`, `one-to-one`,
+`protocol`, `medicine`
+
+## Entities
+
+`entityName` values available in templates:
+
+`summary`, `summary_agenda`, `sales_general`, `sales_coach`, `hr_summary`,
+`questions_and_answers`, `research_insights`, `team_sync_agenda`,
+`summary_by_speaker`, `workshop-double`, `seo-article-double`, `one_to_one`,
+`med-anamnesis`, `protocol`, `template-recommendation`
