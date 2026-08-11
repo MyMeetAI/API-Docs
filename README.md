@@ -13,8 +13,12 @@ reports, transcripts and followups.
 ## Getting started
 
 1. Register an account at https://app.mymeet.ai/
-2. The API is available for B2B clients — contact the [sales team](https://mymeet.ai/contact) to get your API key.
-3. Explore and try requests in the interactive reference: https://backend.mymeet.ai/docs/
+2. Get (or regenerate) your API key in your [account settings](https://app.mymeet.ai/settings/api-key)
+   (Settings → API Key) — the key works with the workspace you select there.
+3. The API works on paid plans: on the Free plan requests are rejected with
+   `403 API key is not available on the free plan`. A workspace admin can also
+   disable API access for a specific seat.
+4. Explore and try requests in the interactive reference: https://backend.mymeet.ai/docs/
 
 ## Authentication
 

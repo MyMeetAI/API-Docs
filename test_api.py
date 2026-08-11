@@ -3,8 +3,9 @@
 Full interactive reference: https://backend.mymeet.ai/docs/
 
 Authentication: pass your API key in the X-API-KEY header on every request.
-The API is available for B2B clients — contact https://mymeet.ai/contact
-to get your key.
+Get (or regenerate) your key in your account settings:
+https://app.mymeet.ai/settings/api-key — the key works with the workspace
+selected there, on paid plans only (Free -> 403).
 """
 from enum import Enum
 import math
@@ -13,7 +14,7 @@ import uuid
 
 import requests
 
-API_KEY = "YOUR_API_KEY"
+API_KEY = "YOUR_API_KEY"  # https://app.mymeet.ai/settings/api-key
 URL = "https://backend.mymeet.ai"
 HEADERS = {"X-API-KEY": API_KEY}
 
