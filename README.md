@@ -341,6 +341,8 @@ params = {
     'format': file_format,
     'timezone': 'UTC',                    # optional
     # 'template_name': 'default-meeting', # optional
+    # 'include_report': 'false',          # optional: leave the AI report out
+    # 'include_tasks': 'false',           # optional: leave the AI tasks block out
 }
 response = requests.get("https://backend.mymeet.ai/api/storage/download",
                         params=params, headers=headers)
@@ -351,6 +353,12 @@ if response.status_code == 200:
 else:
     print("Failed to download file:", response.text)
 ```
+
+`include_report` and `include_tasks` (both default to `true`) are the same two
+toggles as in the export dialog of the web app — "Add AI report" and "Add AI
+tasks". Pass `false` to leave the AI report or the AI tasks block out of the
+file; for `format=json` the tasks are removed from `followup_v2.templates` as
+well. Any value other than `false` counts as `true`.
 
 ## Generate new template
 

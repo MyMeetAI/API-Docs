@@ -342,6 +342,8 @@ params = {
     'format': file_format,
     'timezone': 'UTC',                    # опционально
     # 'template_name': 'default-meeting', # опционально
+    # 'include_report': 'false',          # опционально: без AI-отчёта
+    # 'include_tasks': 'false',           # опционально: без блока AI-задач
 }
 response = requests.get("https://backend.mymeet.ai/api/storage/download",
                         params=params, headers=headers)
@@ -352,6 +354,12 @@ if response.status_code == 200:
 else:
     print("Не удалось скачать файл:", response.text)
 ```
+
+`include_report` и `include_tasks` (по умолчанию `true`) — те же два
+переключателя, что в диалоге экспорта в личном кабинете: «Добавить AI отчёт» и
+«Добавить AI задачи». Передайте `false`, чтобы не включать в файл AI-отчёт или
+блок AI-задач; для `format=json` задачи при этом убираются и из
+`followup_v2.templates`. Любое значение, кроме `false`, считается `true`.
 
 ## Применить другой шаблон
 

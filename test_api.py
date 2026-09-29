@@ -177,6 +177,8 @@ def download_meeting():
         'format': file_format,
         'timezone': 'UTC',                             # optional
         'template_name': TemplateType.DEFAULT.value,   # optional
+        'include_report': 'true',                      # optional: 'false' leaves the AI report out
+        'include_tasks': 'true',                       # optional: 'false' leaves the AI tasks block out
     }
     response = requests.get(URL + "/api/storage/download", params=params, headers=HEADERS)
     if response.status_code == 200:
