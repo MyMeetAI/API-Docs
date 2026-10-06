@@ -64,6 +64,9 @@ print(response.text)
 | POST | [`/api/undo-clear-transcript`](#undo-clear-transcript) | Restore a cleared transcript |
 | PUT | [`/api/meeting`](#rename-meeting) | Rename a meeting |
 | PUT | [`/api/meeting/{meetingId}/summary`](#update-meeting-summary) | Edit a summary block of the report |
+| GET / POST | [`/api/workspaces/active/tags`](#meeting-tags) | Tag catalogue of the workspace |
+| PUT / DELETE | [`/api/workspaces/active/meetings/{meetingId}/tags/{tagId}`](#meeting-tags) | Attach / detach a tag on a meeting |
+| GET | [`/api/workspaces/active/meetings/search`](#meeting-tags) | Filter meetings by tag, title, source, author or date |
 
 ## Record online-meeting
 
@@ -433,6 +436,68 @@ payload = {
 response = requests.put(f"https://backend.mymeet.ai/api/meeting/{meeting_id}/summary",
                         json=payload, headers=headers)
 print(response.status_code)
+```
+
+## Meeting tags
+
+Tags are short labels (up to 24 characters, one of 8 colours) kept in a
+per-workspace catalogue and attached to any number of meetings. The whole
+workspace shares them: the web app and the API see the same tags. An
+integration typically marks the meetings it has handled (`processed`,
+`routed-to-crm`, `project-x`) and later filters by that tag, so you do not
+need your own registry of processed meetings.
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/workspaces/active/tags` | List the catalogue (cursor pagination: `perPage` ≤ 100, `cursor` = previous `nextCursor`) |
+| POST | `/api/workspaces/active/tags` | Create a tag: `{"name": ..., "color": ...}` (`color` optional) |
+| GET / PATCH / DELETE | `/api/workspaces/active/tags/{tagId}` | Read, rename / recolour, delete a tag |
+| POST | `/api/workspaces/active/tags/{tagId}/restore` | Undo a deletion within 10 s (`{"deletionId": ...}` from the DELETE response) |
+| GET | `/api/workspaces/active/meetings/{meetingId}/tags` | Tags of a meeting |
+| POST | `/api/workspaces/active/meetings/{meetingId}/tags` | Create a tag and attach it in one call |
+| PUT / DELETE | `/api/workspaces/active/meetings/{meetingId}/tags/{tagId}` | Attach / detach an existing tag (idempotent) |
+| GET | `/api/workspaces/active/meetings/search?tagIds=ID1,ID2` | Meetings carrying **any** of the tags; also `q`, `scope=all\|my\|shared`, `sources`, `authors`, `dateFrom`, `dateTo`, `page`, `perPage` ≤ 50 |
+
+Rules:
+
+- Names are unique per workspace case-insensitively; a duplicate answers
+  `409 TAG_NAME_EXISTS` — look the tag up in the catalogue instead. Colours:
+  `blue`, `purple`, `orange`, `yellow`, `teal`, `green`, `red`, `grey`.
+- Attaching and detaching require being an author of the meeting or a
+  workspace owner/manager (`403 TAG_ACCESS_DENIED` otherwise). Any member of
+  the workspace can create, rename or delete catalogue tags.
+- Deleting a catalogue tag detaches it from every meeting.
+- Errors are JSON `{"code": ..., "message": ..., "field": ...}`. Every
+  mutation accepts an optional `mutationId` idempotency key: a repeat with the
+  same key within 24 h returns the stored result instead of applying it twice.
+- Meeting lists (`all-meetings`, `user-meetings`, `search`) and
+  `GET /api/video/report` carry `tags` (the first two) and `tagsCount` for
+  every meeting.
+
+```python
+BASE = "https://backend.mymeet.ai/api/workspaces/active"
+meeting_id = "MEETING_ID"
+
+# 1. Find the tag in the catalogue, create it when missing
+response = requests.get(f"{BASE}/tags", params={'perPage': 100}, headers=headers)
+by_name = {t['name'].casefold(): t['id'] for t in response.json()['tags']}
+tag_id = by_name.get('processed')
+if not tag_id:
+    response = requests.post(f"{BASE}/tags",
+                             json={'name': 'processed', 'color': 'green'}, headers=headers)
+    tag_id = response.json()['tag']['id']
+
+# 2. Attach it to the meeting (idempotent, safe to retry)
+response = requests.put(f"{BASE}/meetings/{meeting_id}/tags/{tag_id}", headers=headers)
+print(response.json())  # {"meetingId": ..., "tagId": ..., "assigned": true}
+
+# 3. Later: meetings that carry the tag
+response = requests.get(f"{BASE}/meetings/search",
+                        params={'tagIds': tag_id, 'page': 0, 'perPage': 30}, headers=headers)
+print(response.json()['total'])
+
+# Detach
+requests.delete(f"{BASE}/meetings/{meeting_id}/tags/{tag_id}", headers=headers)
 ```
 
 ## Templates

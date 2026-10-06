@@ -248,3 +248,119 @@ def update_meeting_summary():
     response = requests.put(f'{URL}/api/meeting/{meeting_id}/summary',
                             json=payload, headers=HEADERS)
     print(response.status_code)
+
+
+def list_tags():
+    """GET /api/workspaces/active/tags — tag catalogue of the workspace.
+
+    Cursor pagination: pass `nextCursor` of the previous page as `cursor`.
+    """
+    tags, cursor = [], None
+    while True:
+        params = {'perPage': 100}
+        if cursor:
+            params['cursor'] = cursor
+        response = requests.get(URL + '/api/workspaces/active/tags',
+                                params=params, headers=HEADERS)
+        data = response.json()
+        tags += data['tags']
+        cursor = data['nextCursor']
+        if not cursor:
+            break
+    for tag in tags:
+        print(tag['id'], tag['name'], tag['color'])
+    return tags
+
+
+def create_tag():
+    """POST /api/workspaces/active/tags — create a catalogue tag.
+
+    Names are unique per workspace (case-insensitive): a duplicate answers
+    409 TAG_NAME_EXISTS — look the tag up with list_tags() instead.
+    `color` is optional (blue, purple, orange, yellow, teal, green, red, grey).
+    """
+    payload = {'name': 'processed', 'color': 'green'}
+    response = requests.post(URL + '/api/workspaces/active/tags',
+                             json=payload, headers=HEADERS)
+    print(response.status_code, response.json())
+    # 201 {"tag": {"id": ..., "name": "processed", ...}, "created": true}
+
+
+def attach_tag():
+    """PUT /api/workspaces/active/meetings/{meetingId}/tags/{tagId} — attach.
+
+    Idempotent: attaching a tag that is already on the meeting answers 200.
+    Requires being an author of the meeting or a workspace owner/manager.
+    """
+    meeting_id, tag_id = 'MEETING_ID', 'TAG_ID'
+    response = requests.put(
+        f'{URL}/api/workspaces/active/meetings/{meeting_id}/tags/{tag_id}',
+        headers=HEADERS)
+    print(response.status_code, response.json())
+    # 200 {"meetingId": ..., "tagId": ..., "assigned": true}
+
+
+def create_and_attach_tag():
+    """POST /api/workspaces/active/meetings/{meetingId}/tags — new tag + attach."""
+    meeting_id = 'MEETING_ID'
+    payload = {'name': 'project-x'}
+    response = requests.post(
+        f'{URL}/api/workspaces/active/meetings/{meeting_id}/tags',
+        json=payload, headers=HEADERS)
+    print(response.status_code, response.json())
+    # 201 {"meetingId": ..., "tagId": ..., "assigned": true, "created": true, "tag": {...}}
+
+
+def detach_tag():
+    """DELETE /api/workspaces/active/meetings/{meetingId}/tags/{tagId} — detach.
+
+    The tag stays in the catalogue; idempotent.
+    """
+    meeting_id, tag_id = 'MEETING_ID', 'TAG_ID'
+    response = requests.delete(
+        f'{URL}/api/workspaces/active/meetings/{meeting_id}/tags/{tag_id}',
+        headers=HEADERS)
+    print(response.status_code, response.json())
+    # 200 {"meetingId": ..., "tagId": ..., "assigned": false}
+
+
+def get_meeting_tags():
+    """GET /api/workspaces/active/meetings/{meetingId}/tags — tags of a meeting."""
+    meeting_id = 'MEETING_ID'
+    response = requests.get(
+        f'{URL}/api/workspaces/active/meetings/{meeting_id}/tags', headers=HEADERS)
+    data = response.json()
+    print(data['tagsCount'], [tag['name'] for tag in data['tags']])
+
+
+def search_meetings_by_tag():
+    """GET /api/workspaces/active/meetings/search — meetings carrying a tag.
+
+    `tagIds` is comma-separated; a meeting matches when it has ANY of them.
+    Other optional filters: q, scope (all|my|shared), sources, authors,
+    dateFrom / dateTo (YYYY-MM-DD). Works for every workspace role.
+    """
+    params = {
+        'tagIds': 'TAG_ID',
+        'page': 0,
+        'perPage': 30,  # at most 50
+    }
+    response = requests.get(URL + '/api/workspaces/active/meetings/search',
+                            params=params, headers=HEADERS)
+    data = response.json()
+    print(data['total'])
+    for meeting in data['followups']:
+        print(meeting['id'], meeting['name'], [tag['name'] for tag in meeting['tags']])
+
+
+def delete_tag():
+    """DELETE /api/workspaces/active/tags/{tagId} — delete a catalogue tag.
+
+    Detaches it from every meeting. The same user can undo within 10 seconds:
+    POST /api/workspaces/active/tags/{tagId}/restore with the returned deletionId.
+    """
+    tag_id = 'TAG_ID'
+    response = requests.delete(URL + f'/api/workspaces/active/tags/{tag_id}',
+                               headers=HEADERS)
+    print(response.status_code, response.json())
+    # 200 {"tagId": ..., "deletionId": ..., "affectedMeetingsCount": 12, "undoExpiresAt": ...}
