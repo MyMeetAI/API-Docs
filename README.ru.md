@@ -64,6 +64,9 @@ print(response.text)
 | POST | [`/api/undo-clear-transcript`](#восстановить-транскрипт) | Восстановить очищенный транскрипт |
 | PUT | [`/api/meeting`](#переименовать-встречу) | Переименовать встречу |
 | PUT | [`/api/meeting/{meetingId}/summary`](#изменить-блок-отчёта) | Изменить блок summary в отчёте |
+| GET / POST | [`/api/workspaces/active/tags`](#теги-встреч) | Каталог тегов воркспейса |
+| PUT / DELETE | [`/api/workspaces/active/meetings/{meetingId}/tags/{tagId}`](#теги-встреч) | Повесить / снять тег со встречи |
+| GET | [`/api/workspaces/active/meetings/search`](#теги-встреч) | Фильтр встреч по тегу, названию, источнику, автору, дате |
 
 ## Запись онлайн-встречи
 
@@ -433,6 +436,69 @@ payload = {
 response = requests.put(f"https://backend.mymeet.ai/api/meeting/{meeting_id}/summary",
                         json=payload, headers=headers)
 print(response.status_code)
+```
+
+## Теги встреч
+
+Теги — короткие метки (до 24 символов, один из 8 цветов) в каталоге
+воркспейса, которые вешаются на любое число встреч. Они общие для всего
+воркспейса: веб-приложение и API видят одни и те же теги. Типичный сценарий
+для интеграции — помечать обработанные встречи (`processed`, `routed-to-crm`,
+`project-x`) и потом фильтровать по тегу, не заводя у себя отдельный реестр
+обработанных встреч.
+
+| Метод | Эндпоинт | Назначение |
+|---|---|---|
+| GET | `/api/workspaces/active/tags` | Каталог тегов (курсорная пагинация: `perPage` ≤ 100, `cursor` = предыдущий `nextCursor`) |
+| POST | `/api/workspaces/active/tags` | Создать тег: `{"name": ..., "color": ...}` (`color` необязателен) |
+| GET / PATCH / DELETE | `/api/workspaces/active/tags/{tagId}` | Прочитать, переименовать / перекрасить, удалить тег |
+| POST | `/api/workspaces/active/tags/{tagId}/restore` | Отменить удаление в течение 10 с (`{"deletionId": ...}` из ответа DELETE) |
+| GET | `/api/workspaces/active/meetings/{meetingId}/tags` | Теги встречи |
+| POST | `/api/workspaces/active/meetings/{meetingId}/tags` | Создать тег и сразу повесить на встречу |
+| PUT / DELETE | `/api/workspaces/active/meetings/{meetingId}/tags/{tagId}` | Повесить / снять существующий тег (идемпотентно) |
+| GET | `/api/workspaces/active/meetings/search?tagIds=ID1,ID2` | Встречи с **любым** из тегов; также `q`, `scope=all\|my\|shared`, `sources`, `authors`, `dateFrom`, `dateTo`, `page`, `perPage` ≤ 50 |
+
+Правила:
+
+- Имя уникально в воркспейсе без учёта регистра; на дубль приходит
+  `409 TAG_NAME_EXISTS` — найдите тег в каталоге. Цвета: `blue`, `purple`,
+  `orange`, `yellow`, `teal`, `green`, `red`, `grey`.
+- Вешать и снимать тег может автор встречи или владелец/менеджер воркспейса
+  (иначе `403 TAG_ACCESS_DENIED`). Создавать, переименовывать и удалять теги
+  каталога может любой участник воркспейса.
+- Удаление тега из каталога снимает его со всех встреч.
+- Ошибки приходят JSON-ом `{"code": ..., "message": ..., "field": ...}`. Любая
+  мутация принимает необязательный ключ идемпотентности `mutationId`: повтор с
+  тем же ключом в течение 24 ч вернёт сохранённый результат, а не применит
+  изменение второй раз.
+- Списки встреч (`all-meetings`, `user-meetings`, `search`) и
+  `GET /api/video/report` несут у каждой встречи `tags` (первые два) и
+  `tagsCount`.
+
+```python
+BASE = "https://backend.mymeet.ai/api/workspaces/active"
+meeting_id = "MEETING_ID"
+
+# 1. Найти тег в каталоге, если нет — создать
+response = requests.get(f"{BASE}/tags", params={'perPage': 100}, headers=headers)
+by_name = {t['name'].casefold(): t['id'] for t in response.json()['tags']}
+tag_id = by_name.get('processed')
+if not tag_id:
+    response = requests.post(f"{BASE}/tags",
+                             json={'name': 'processed', 'color': 'green'}, headers=headers)
+    tag_id = response.json()['tag']['id']
+
+# 2. Повесить на встречу (идемпотентно — повтор безопасен)
+response = requests.put(f"{BASE}/meetings/{meeting_id}/tags/{tag_id}", headers=headers)
+print(response.json())  # {"meetingId": ..., "tagId": ..., "assigned": true}
+
+# 3. Потом: встречи с этим тегом
+response = requests.get(f"{BASE}/meetings/search",
+                        params={'tagIds': tag_id, 'page': 0, 'perPage': 30}, headers=headers)
+print(response.json()['total'])
+
+# Снять тег
+requests.delete(f"{BASE}/meetings/{meeting_id}/tags/{tag_id}", headers=headers)
 ```
 
 ## Шаблоны
