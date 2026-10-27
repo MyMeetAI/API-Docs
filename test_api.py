@@ -160,6 +160,33 @@ def get_meeting_json():
     print(response.json())
 
 
+def wait_for_all_parts(meeting_id="MEETING_ID", poll_seconds=60):
+    """Every part of a recording longer than 3 hours, in order, once processed.
+
+    Such a recording is processed as several meetings: part 1 keeps the id the
+    creating request returned, every further part gets its own id. The report
+    of any part carries `part.meetings` — the parts created so far — and the
+    list grows until it reaches `part.total`. See README, "Recordings longer
+    than 3 hours". Returns [meeting_id] for an ordinary meeting.
+    """
+    import time
+
+    while True:
+        report = requests.get(URL + "/api/video/report",
+                              params={'meeting_id': meeting_id}, headers=HEADERS)
+        if report.status_code == 202:  # part 1 is still processing
+            time.sleep(poll_seconds)
+            continue
+        report.raise_for_status()
+        part = report.json().get("part")
+        if part is None:  # an ordinary meeting
+            return [meeting_id]
+        parts = part["meetings"]
+        if len(parts) == part["total"] and all(p["status"] != "processing" for p in parts):
+            return [p["meeting_id"] for p in sorted(parts, key=lambda p: p["index"])]
+        time.sleep(poll_seconds)
+
+
 def delete_meeting():
     """DELETE /api/video/report — delete a meeting."""
     params = {

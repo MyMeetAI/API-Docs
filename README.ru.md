@@ -230,7 +230,7 @@ X-Mymeet-Timestamp: 1783425600
 X-Mymeet-Signature: sha256=<hex>   (только при заданном webhook_secret)
 
 {"event": "meeting.completed", "meeting_id": "...",
- "timestamp": "2026-07-07T12:00:00Z",
+ "timestamp": "2026-07-07T12:00:00Z", "part": null,
  "data": {"title": "Daily sync", "is_transcript_empty": false,
           "report_url": "https://backend.mymeet.ai/api/video/report?meeting_id=..."}}
 ```
@@ -244,9 +244,12 @@ X-Mymeet-Signature: sha256=<hex>   (только при заданном webhook
 
 ```
 {"event": "meeting.failed", "meeting_id": "...",
- "timestamp": "2026-07-07T12:00:00Z",
+ "timestamp": "2026-07-07T12:00:00Z", "part": null,
  "data": {"reason": "Recording failed"}}
 ```
+
+`part` равен `null` у обычной встречи — когда он заполнен, см.
+[Записи длиннее 3 часов](#записи-длиннее-3-часов).
 
 ### Шаг 3 — проверяйте подпись (если задан `webhook_secret`)
 
@@ -270,6 +273,105 @@ X-Mymeet-Signature: sha256=<hex>   (только при заданном webhook
 каждое срабатывание записывает встречу и шлёт своё уведомление; вся серия
 делит `meeting_id` расписания (тот, что вернул запрос на планирование),
 отчёт каждого срабатывания замещает предыдущий.
+
+## Записи длиннее 3 часов
+
+Запись длиннее 3 часов обрабатывается как **несколько встреч**. При обработке
+она режется на части до 3 часов каждая (хвост короче 30 минут приклеивается
+к предыдущей части): 7-часовая запись превращается в три части по 3 ч, 3 ч и
+1 ч. Часть 1 остаётся под тем `meeting_id`, который вернул создавший запрос;
+каждая следующая — отдельная встреча со своим id, и создаётся она только
+после того, как закончилась предыдущая. В название добавляется номер части:
+`Daily sync 1`, `Daily sync 2`, …
+
+Каждая часть связана с исходной встречей. В payload вебхука и в ответе
+`GET /api/video/report` эта связь — объект `part` (`null` у обычной встречи):
+
+| Поле | Значение |
+|---|---|
+| `group_meeting_id` | Исходный `meeting_id` — тот, что вернул `POST /api/record-meeting` / `POST /api/video`. Один у всех частей. |
+| `index` | Номер этой части, с 1. |
+| `total` | На сколько частей разрезана запись. |
+| `meetings` | Только в отчёте: все уже созданные части в этом воркспейсе — `meeting_id`, `index`, `status`, `title` — по порядку `index`. |
+
+В примерах ниже `MEETING_ID` — id, который вернул создавший запрос, а
+`PART_2_ID` / `PART_3_ID` — id следующих частей.
+
+### С вебхуками
+
+Каждая часть шлёт своё `meeting.completed` (или `meeting.failed`) на тот же
+`webhook_url`, по порядку, так что `total` известен уже из первого
+уведомления. Часть 1 приходит под исходным id:
+
+```
+{"event": "meeting.completed", "meeting_id": "MEETING_ID",
+ "timestamp": "2026-10-27T12:40:00Z",
+ "part": {"group_meeting_id": "MEETING_ID", "index": 1, "total": 3},
+ "data": {"title": "Daily sync 1", "is_transcript_empty": false,
+          "report_url": "https://backend.mymeet.ai/api/video/report?meeting_id=MEETING_ID"}}
+```
+
+Часть 2 — под своим id, с тем же `group_meeting_id`:
+
+```
+{"event": "meeting.completed", "meeting_id": "PART_2_ID",
+ "timestamp": "2026-10-27T13:05:00Z",
+ "part": {"group_meeting_id": "MEETING_ID", "index": 2, "total": 3},
+ "data": {"title": "Daily sync 2", "is_transcript_empty": false,
+          "report_url": "https://backend.mymeet.ai/api/video/report?meeting_id=PART_2_ID"}}
+```
+
+Собирайте части по `group_meeting_id` и действуйте, когда пришло `total`
+штук — приёмник из раздела [Вебхуки](#вебхуки), дополненный:
+
+```python
+groups = {}  # group_meeting_id -> {index: meeting_id}
+
+@app.post("/mymeet-webhook")
+async def hook(request: Request):
+    # ... проверка подписи как в разделе «Вебхуки» ...
+    event = await request.json()
+    part = event.get("part")
+    if part is None:                      # обычная встреча
+        fetch_report(event["meeting_id"])
+        return Response(status_code=200)
+    group = groups.setdefault(part["group_meeting_id"], {})
+    group[part["index"]] = event["meeting_id"]
+    if len(group) == part["total"]:       # все части готовы
+        for index in sorted(group):
+            fetch_report(group[index])
+    return Response(status_code=200)
+```
+
+### Без вебхуков
+
+Поллите `GET /api/meeting/status` по исходному id, пока статус не перестанет
+быть `processing`, затем читайте `part` в ответе его `GET /api/video/report`.
+`part.meetings` перечисляет уже созданные части и растёт, пока не дойдёт до
+`part.total`; часть, которая ещё обрабатывается, стоит в списке со
+`"status": "processing"`:
+
+```
+GET /api/video/report?meeting_id=MEETING_ID
+
+{"name": "Daily sync 1", "status": "new", "duration": 180,
+ "chapters": [...], "templates": [...], "speakers": [...],
+ "part": {"group_meeting_id": "MEETING_ID", "index": 1, "total": 3,
+          "meetings": [
+            {"meeting_id": "MEETING_ID", "index": 1, "status": "new", "title": "Daily sync 1"},
+            {"meeting_id": "PART_2_ID", "index": 2, "status": "processing", "title": "Daily sync 2"}]},
+ ...}
+```
+
+Отчёт любой части несёт тот же список `meetings`, а пакетная форма статуса
+проверяет все части одним запросом
+(`GET /api/meeting/status?meeting_ids=MEETING_ID,PART_2_ID,PART_3_ID`).
+`wait_for_all_parts()` в [`test_api.py`](test_api.py) поллит отчёт, пока все
+части не обработаются, и возвращает их id по порядку.
+
+Во всём остальном каждая часть — самостоятельная встреча: у неё свой отчёт,
+статус, выгрузка и теги, она отдельно показывается в списках встреч и
+отдельно удаляется через `DELETE /api/video/report`.
 
 ## Список встреч
 
