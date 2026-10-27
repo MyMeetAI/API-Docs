@@ -274,39 +274,105 @@ its own notification; the whole series shares the schedule's `meeting_id`
 (the one returned by the scheduling request), each firing's report replacing
 the previous one.
 
-### Recordings longer than 3 hours
+## Recordings longer than 3 hours
 
-On processing such a recording is split into parts of up to 3 hours each (a
-tail shorter than 30 minutes is merged into the previous part). Part 1 keeps
-the original `meeting_id`; every further part is a separate meeting with its
-own id and the title suffixed with the part number (`Daily sync 1`,
-`Daily sync 2`, …). Each part sends its own `meeting.completed` /
-`meeting.failed` to the same `webhook_url`, and the payload's `part` object
-tells which part it is and how many to expect:
+A recording longer than 3 hours is processed as **several meetings**. On
+processing it is split into parts of up to 3 hours each (a tail shorter than
+30 minutes is merged into the previous part): a 7-hour recording becomes
+three parts of 3 h, 3 h and 1 h. Part 1 keeps the `meeting_id` the creating
+request returned; every further part is a separate meeting with its own id,
+created only when the previous part has finished. The title gets the part
+number: `Daily sync 1`, `Daily sync 2`, …
+
+Every part is linked to the original meeting. In webhook payloads and in
+`GET /api/video/report` the link is the `part` object (`null` for an ordinary
+meeting):
+
+| Field | Meaning |
+|---|---|
+| `group_meeting_id` | The original `meeting_id` — the one `POST /api/record-meeting` / `POST /api/video` returned. The same for every part. |
+| `index` | Number of this part, from 1. |
+| `total` | How many parts the recording was split into. |
+| `meetings` | Report only: every part created so far in this workspace — `meeting_id`, `index`, `status`, `title` — ordered by `index`. |
+
+In the examples below `MEETING_ID` is the id the creating request returned
+and `PART_2_ID` / `PART_3_ID` are the ids of the further parts.
+
+### With webhooks
+
+Each part sends its own `meeting.completed` (or `meeting.failed`) to the same
+`webhook_url`, in order, so `total` is known from the first notification.
+Part 1 arrives under the original id:
 
 ```
-{"event": "meeting.completed", "meeting_id": "<id of part 2>",
- "timestamp": "2026-07-07T15:10:00Z",
- "part": {"group_meeting_id": "<original meeting_id>", "index": 2, "total": 3},
+{"event": "meeting.completed", "meeting_id": "MEETING_ID",
+ "timestamp": "2026-10-27T12:40:00Z",
+ "part": {"group_meeting_id": "MEETING_ID", "index": 1, "total": 3},
+ "data": {"title": "Daily sync 1", "is_transcript_empty": false,
+          "report_url": "https://backend.mymeet.ai/api/video/report?meeting_id=MEETING_ID"}}
+```
+
+Part 2 arrives under its own id, with the same `group_meeting_id`:
+
+```
+{"event": "meeting.completed", "meeting_id": "PART_2_ID",
+ "timestamp": "2026-10-27T13:05:00Z",
+ "part": {"group_meeting_id": "MEETING_ID", "index": 2, "total": 3},
  "data": {"title": "Daily sync 2", "is_transcript_empty": false,
-          "report_url": "https://backend.mymeet.ai/api/video/report?meeting_id=<id of part 2>"}}
+          "report_url": "https://backend.mymeet.ai/api/video/report?meeting_id=PART_2_ID"}}
 ```
 
-Parts are processed one after another, so the notifications arrive in order
-and `total` is known from the very first one. Without a webhook, poll
-`GET /api/meeting/status` on the original id and read `part` in its
-`GET /api/video/report` response: `part.meetings` lists every part created so
-far with its id and status, and grows until it reaches `part.total`:
+Collect the parts by `group_meeting_id` and act once `total` of them have
+arrived — the receiver from [Webhooks](#webhooks), extended:
 
-```json
-"part": {
-  "group_meeting_id": "<original meeting_id>", "index": 1, "total": 3,
-  "meetings": [
-    {"meeting_id": "<original meeting_id>", "index": 1, "status": "new", "title": "Daily sync 1"},
-    {"meeting_id": "<id of part 2>", "index": 2, "status": "processing", "title": "Daily sync 2"}
-  ]
-}
+```python
+groups = {}  # group_meeting_id -> {index: meeting_id}
+
+@app.post("/mymeet-webhook")
+async def hook(request: Request):
+    # ... signature check as in the Webhooks section ...
+    event = await request.json()
+    part = event.get("part")
+    if part is None:                      # an ordinary meeting
+        fetch_report(event["meeting_id"])
+        return Response(status_code=200)
+    group = groups.setdefault(part["group_meeting_id"], {})
+    group[part["index"]] = event["meeting_id"]
+    if len(group) == part["total"]:       # every part is ready
+        for index in sorted(group):
+            fetch_report(group[index])
+    return Response(status_code=200)
 ```
+
+### Without webhooks
+
+Poll `GET /api/meeting/status` on the original id until it leaves
+`processing`, then read `part` from its `GET /api/video/report` response.
+`part.meetings` lists the parts created so far and grows until it reaches
+`part.total`; a part that is still being processed is listed with
+`"status": "processing"`:
+
+```
+GET /api/video/report?meeting_id=MEETING_ID
+
+{"name": "Daily sync 1", "status": "new", "duration": 180,
+ "chapters": [...], "templates": [...], "speakers": [...],
+ "part": {"group_meeting_id": "MEETING_ID", "index": 1, "total": 3,
+          "meetings": [
+            {"meeting_id": "MEETING_ID", "index": 1, "status": "new", "title": "Daily sync 1"},
+            {"meeting_id": "PART_2_ID", "index": 2, "status": "processing", "title": "Daily sync 2"}]},
+ ...}
+```
+
+The report of any part carries the same `meetings` list, and the batch form
+of the status endpoint checks all of them in one request
+(`GET /api/meeting/status?meeting_ids=MEETING_ID,PART_2_ID,PART_3_ID`).
+`wait_for_all_parts()` in [`test_api.py`](test_api.py) polls the report until
+every part is processed and returns their ids in order.
+
+In every other respect each part is a meeting of its own: it has its own
+report, status, download and tags, appears separately in the meeting lists
+and is deleted separately with `DELETE /api/video/report`.
 
 ## Get meeting list
 
