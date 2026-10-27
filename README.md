@@ -229,7 +229,7 @@ X-Mymeet-Timestamp: 1783425600
 X-Mymeet-Signature: sha256=<hex>   (only when webhook_secret is set)
 
 {"event": "meeting.completed", "meeting_id": "...",
- "timestamp": "2026-07-07T12:00:00Z",
+ "timestamp": "2026-07-07T12:00:00Z", "part": null,
  "data": {"title": "Daily sync", "is_transcript_empty": false,
           "report_url": "https://backend.mymeet.ai/api/video/report?meeting_id=..."}}
 ```
@@ -243,9 +243,13 @@ meetings), or a generic `Recording failed` / `Processing failed` /
 
 ```
 {"event": "meeting.failed", "meeting_id": "...",
- "timestamp": "2026-07-07T12:00:00Z",
+ "timestamp": "2026-07-07T12:00:00Z", "part": null,
  "data": {"reason": "Recording failed"}}
 ```
+
+`part` is `null` for an ordinary meeting — see
+[Recordings longer than 3 hours](#recordings-longer-than-3-hours) for when
+it is set.
 
 ### Step 3 — verify the signature (when you set `webhook_secret`)
 
@@ -269,6 +273,40 @@ notification). For `cron` schedules every firing records a meeting and sends
 its own notification; the whole series shares the schedule's `meeting_id`
 (the one returned by the scheduling request), each firing's report replacing
 the previous one.
+
+### Recordings longer than 3 hours
+
+On processing such a recording is split into parts of up to 3 hours each (a
+tail shorter than 30 minutes is merged into the previous part). Part 1 keeps
+the original `meeting_id`; every further part is a separate meeting with its
+own id and the title suffixed with the part number (`Daily sync 1`,
+`Daily sync 2`, …). Each part sends its own `meeting.completed` /
+`meeting.failed` to the same `webhook_url`, and the payload's `part` object
+tells which part it is and how many to expect:
+
+```
+{"event": "meeting.completed", "meeting_id": "<id of part 2>",
+ "timestamp": "2026-07-07T15:10:00Z",
+ "part": {"group_meeting_id": "<original meeting_id>", "index": 2, "total": 3},
+ "data": {"title": "Daily sync 2", "is_transcript_empty": false,
+          "report_url": "https://backend.mymeet.ai/api/video/report?meeting_id=<id of part 2>"}}
+```
+
+Parts are processed one after another, so the notifications arrive in order
+and `total` is known from the very first one. Without a webhook, poll
+`GET /api/meeting/status` on the original id and read `part` in its
+`GET /api/video/report` response: `part.meetings` lists every part created so
+far with its id and status, and grows until it reaches `part.total`:
+
+```json
+"part": {
+  "group_meeting_id": "<original meeting_id>", "index": 1, "total": 3,
+  "meetings": [
+    {"meeting_id": "<original meeting_id>", "index": 1, "status": "new", "title": "Daily sync 1"},
+    {"meeting_id": "<id of part 2>", "index": 2, "status": "processing", "title": "Daily sync 2"}
+  ]
+}
+```
 
 ## Get meeting list
 

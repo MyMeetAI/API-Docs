@@ -230,7 +230,7 @@ X-Mymeet-Timestamp: 1783425600
 X-Mymeet-Signature: sha256=<hex>   (только при заданном webhook_secret)
 
 {"event": "meeting.completed", "meeting_id": "...",
- "timestamp": "2026-07-07T12:00:00Z",
+ "timestamp": "2026-07-07T12:00:00Z", "part": null,
  "data": {"title": "Daily sync", "is_transcript_empty": false,
           "report_url": "https://backend.mymeet.ai/api/video/report?meeting_id=..."}}
 ```
@@ -244,9 +244,12 @@ X-Mymeet-Signature: sha256=<hex>   (только при заданном webhook
 
 ```
 {"event": "meeting.failed", "meeting_id": "...",
- "timestamp": "2026-07-07T12:00:00Z",
+ "timestamp": "2026-07-07T12:00:00Z", "part": null,
  "data": {"reason": "Recording failed"}}
 ```
+
+`part` равен `null` у обычной встречи — когда он заполнен, см.
+[Записи длиннее 3 часов](#записи-длиннее-3-часов).
 
 ### Шаг 3 — проверяйте подпись (если задан `webhook_secret`)
 
@@ -270,6 +273,39 @@ X-Mymeet-Signature: sha256=<hex>   (только при заданном webhook
 каждое срабатывание записывает встречу и шлёт своё уведомление; вся серия
 делит `meeting_id` расписания (тот, что вернул запрос на планирование),
 отчёт каждого срабатывания замещает предыдущий.
+
+### Записи длиннее 3 часов
+
+При обработке такая запись режется на части до 3 часов каждая (хвост короче
+30 минут приклеивается к предыдущей части). Часть 1 остаётся под исходным
+`meeting_id`; каждая следующая — отдельная встреча со своим id и номером
+части в названии (`Daily sync 1`, `Daily sync 2`, …). Каждая часть шлёт своё
+`meeting.completed` / `meeting.failed` на тот же `webhook_url`, а объект
+`part` в payload говорит, какая это часть и сколько их всего:
+
+```
+{"event": "meeting.completed", "meeting_id": "<id части 2>",
+ "timestamp": "2026-07-07T15:10:00Z",
+ "part": {"group_meeting_id": "<исходный meeting_id>", "index": 2, "total": 3},
+ "data": {"title": "Daily sync 2", "is_transcript_empty": false,
+          "report_url": "https://backend.mymeet.ai/api/video/report?meeting_id=<id части 2>"}}
+```
+
+Части обрабатываются по очереди, поэтому уведомления приходят по порядку, а
+`total` известен уже из первого. Без вебхука поллите
+`GET /api/meeting/status` по исходному id и читайте `part` в ответе его
+`GET /api/video/report`: `part.meetings` перечисляет все уже созданные части
+с их id и статусом и растёт, пока не дойдёт до `part.total`:
+
+```json
+"part": {
+  "group_meeting_id": "<исходный meeting_id>", "index": 1, "total": 3,
+  "meetings": [
+    {"meeting_id": "<исходный meeting_id>", "index": 1, "status": "new", "title": "Daily sync 1"},
+    {"meeting_id": "<id части 2>", "index": 2, "status": "processing", "title": "Daily sync 2"}
+  ]
+}
+```
 
 ## Список встреч
 
