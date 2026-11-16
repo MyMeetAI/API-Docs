@@ -379,6 +379,9 @@ and is deleted separately with `DELETE /api/video/report`.
 `GET /api/workspaces/active/all-meetings`
 
 Returns a paginated list of meetings for the authenticated workspace.
+Available to the workspace owner and managers; with a member's key it answers
+`403` — use `GET /api/workspaces/active/user-meetings` instead: the key
+owner's own meetings, same parameters and response.
 
 ```python
 params = {
@@ -388,6 +391,36 @@ params = {
 response = requests.get("https://backend.mymeet.ai/api/workspaces/active/all-meetings",
                         params=params, headers=headers)
 print(response.text)
+```
+
+### Find a meeting by its conference link
+
+A meeting the bot recorded from a calendar is not created through the API, so
+you learn its `meeting_id` from the meeting list. Filter the list by `link`
+and, optionally, `date`:
+
+- `link` — the conference link, matched as a whole string (query parameters
+  included): the link from the calendar event, or the `link` you passed to
+  `POST /api/record-meeting`.
+- `date` — the exact start of the meeting, ISO 8601 with an offset
+  (`2026-11-20T10:00:00+03:00`; a value without an offset is read as UTC).
+  An unparsable value answers `400`.
+
+With either filter set, the list holds only meetings whose processing has
+started: a meeting the bot is still recording shows up once the recording
+ends. Both filters work the same way on `user-meetings`.
+
+```python
+params = {
+    'page': 0,
+    'perPage': 10,
+    'link': 'https://meet.google.com/zyj-qrmk-gvo',
+    # 'date': '2026-11-20T10:00:00+03:00',  # optional: exact start time
+}
+response = requests.get("https://backend.mymeet.ai/api/workspaces/active/all-meetings",
+                        params=params, headers=headers)
+for meeting in response.json()['followups']:
+    print(meeting['id'], meeting['status'], meeting['date'])
 ```
 
 ## Get meeting status
