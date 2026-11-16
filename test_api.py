@@ -133,6 +133,22 @@ def get_meeting_list():
     print(response.text)
 
 
+def find_meeting_by_link():
+    """GET /api/workspaces/active/all-meetings?link=... — meeting_id of a
+    meeting recorded at a conference link (e.g. by the calendar bot).
+    Only meetings whose processing has started are listed with this filter."""
+    params = {
+        'page': 0,
+        'perPage': 10,
+        'link': "https://meet.google.com/zyj-qrmk-gvo",  # exact match
+        # 'date': "2026-11-20T10:00:00+03:00",  # optional: exact start, ISO 8601
+    }
+    response = requests.get(URL + "/api/workspaces/active/all-meetings",
+                            params=params, headers=HEADERS)
+    for meeting in response.json()['followups']:
+        print(meeting['id'], meeting['status'], meeting['date'])
+
+
 def get_meeting_status():
     """GET /api/meeting/status — single meeting (plain-text response)."""
     params = {

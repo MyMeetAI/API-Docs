@@ -377,7 +377,10 @@ GET /api/video/report?meeting_id=MEETING_ID
 
 `GET /api/workspaces/active/all-meetings`
 
-Возвращает постраничный список встреч воркспейса.
+Возвращает постраничный список встреч воркспейса. Доступен владельцу и
+менеджерам воркспейса. С ключом участника метод отвечает `403` — тогда
+используйте `GET /api/workspaces/active/user-meetings`: он возвращает
+встречи владельца ключа, параметры и ответ те же.
 
 ```python
 params = {
@@ -387,6 +390,36 @@ params = {
 response = requests.get("https://backend.mymeet.ai/api/workspaces/active/all-meetings",
                         params=params, headers=headers)
 print(response.text)
+```
+
+### Найти встречу по ссылке на конференцию
+
+Встреча, которую бот записал по календарю, создаётся не через API, поэтому её
+`meeting_id` можно узнать только из списка встреч. Отфильтруйте список по
+`link` и, при необходимости, по `date`:
+
+- `link` — ссылка на конференцию. Сравнивается вся строка целиком, вместе с
+  параметрами запроса. Это ссылка из события календаря или `link`, который вы
+  передали в `POST /api/record-meeting`.
+- `date` — точное время начала встречи в ISO 8601 со смещением, например
+  `2026-11-20T10:00:00+03:00`. Значение без смещения читается как UTC. На
+  значение, которое не удаётся разобрать, метод отвечает `400`.
+
+С любым из фильтров в списке только встречи, обработка которых уже началась.
+Встреча, которую бот ещё записывает, появится после окончания записи. У
+`user-meetings` оба фильтра работают так же.
+
+```python
+params = {
+    'page': 0,
+    'perPage': 10,
+    'link': 'https://meet.google.com/zyj-qrmk-gvo',
+    # 'date': '2026-11-20T10:00:00+03:00',  # необязательно: точное время начала
+}
+response = requests.get("https://backend.mymeet.ai/api/workspaces/active/all-meetings",
+                        params=params, headers=headers)
+for meeting in response.json()['followups']:
+    print(meeting['id'], meeting['status'], meeting['date'])
 ```
 
 ## Статус встречи
