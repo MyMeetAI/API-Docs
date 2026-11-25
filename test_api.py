@@ -122,6 +122,33 @@ def upload_file():
     print(response.json())  # {"meeting_id": ..., "user_id": ...}
 
 
+def import_media_link(url, idempotency_key, *, template_name=None, speakers_number=0):
+    """Start an import from YouTube, Yandex Disk, or Google Drive."""
+    payload = {"url": url, "speakers_number": speakers_number}
+    if template_name is not None:
+        payload["template_name"] = template_name
+    response = requests.post(
+        URL + "/api/video/import-link",
+        headers={**HEADERS, "Idempotency-Key": str(idempotency_key)},
+        json=payload,
+        timeout=30,
+    )
+    response.raise_for_status()
+    return response.json()  # meeting_id, source, status
+
+
+def get_media_import_status(meeting_id):
+    """Check media_import.phase on the returned entry for the whole import."""
+    response = requests.get(
+        URL + "/api/meeting/status",
+        headers=HEADERS,
+        params={"meeting_ids": meeting_id},
+        timeout=30,
+    )
+    response.raise_for_status()
+    return response.json()["statuses"][meeting_id]
+
+
 def get_meeting_list():
     """GET /api/workspaces/active/all-meetings — paginated meeting list."""
     params = {
