@@ -3,8 +3,8 @@
 **English** | [Русский](README.ru.md)
 
 Official documentation and code samples for the [mymeet.ai](https://mymeet.ai) public API:
-send a bot to record online meetings, upload audio/video files, and fetch AI-generated
-reports, transcripts and followups.
+send a bot to record online meetings, upload audio/video files, import recordings from
+links, and fetch AI-generated reports, transcripts and followups.
 
 - 📘 Full interactive API reference: https://backend.mymeet.ai/docs/
 - 🐍 Python snippets for every endpoint: [`test_api.py`](test_api.py)
@@ -54,6 +54,7 @@ print(response.text)
 |---|---|---|
 | POST | [`/api/record-meeting`](#record-online-meeting) | Send a bot to record an online meeting |
 | POST | [`/api/video`](#upload-file) | Upload an audio/video file |
+| POST | [`/api/video/import-link`](#import-a-recording-from-a-link) | Import a recording from YouTube, Yandex Disk, or Google Drive |
 | GET | [`/api/workspaces/active/all-meetings`](#get-meeting-list) | List meetings in the workspace |
 | GET | [`/api/meeting/status`](#get-meeting-status) | Meeting status (single or batch) |
 | GET | [`/api/video/report`](#get-meeting-json) | Full meeting report as JSON |
@@ -160,6 +161,69 @@ Notes:
   `upload_session_id` for every full upload attempt.
 - Supplying `expected_file_size` / `expected_sha256` enables end-to-end
   integrity validation before a meeting is created.
+
+## Import a recording from a link
+
+`POST /api/video/import-link`
+
+Send an HTTPS link to one YouTube video or one audio or video file on Yandex Disk
+or Google Drive. The recording must be accessible without signing in. Cloud files
+must allow downloads. Live streams, playlists, and folders are unsupported.
+
+Send `X-API-KEY` and a UUID in `Idempotency-Key`. Keep the UUID when retrying the
+same request in the same workspace, including after a timeout. A repeat returns
+the original `meeting_id`. Reusing a UUID with a different link or processing
+settings returns `409 idempotency_conflict`.
+
+```python
+import uuid
+
+import_key = str(uuid.uuid4())  # Save this before sending the request.
+response = requests.post(
+    "https://backend.mymeet.ai/api/video/import-link",
+    headers={**headers, "Idempotency-Key": import_key},
+    json={"url": "YOUR_PUBLIC_RECORDING_URL", "speakers_number": 0},
+    timeout=30,
+)
+response.raise_for_status()
+meeting_id = response.json()["meeting_id"]
+```
+
+`speakers_number` is optional. Use `0` for automatic detection or `1`–`50` to set
+the count. You can also pass `template_name` to choose the report template.
+
+`202 Accepted` returns `meeting_id`, `source` (`youtube`, `yandex_disk`, or
+`google_drive`), and the current meeting `status`. The import continues in the
+background. Poll the [JSON status](#get-meeting-status) with `meeting_ids`, even
+for one import.
+
+```python
+response = requests.get(
+    "https://backend.mymeet.ai/api/meeting/status",
+    headers=headers,
+    params={"meeting_ids": meeting_id},
+    timeout=30,
+)
+response.raise_for_status()
+entry = response.json()["statuses"][meeting_id]
+if "error" in entry:
+    raise RuntimeError(entry["error"])  # not_found or forbidden
+print(entry["media_import"])
+```
+
+Use `media_import.phase` on the original ID for the whole recording. Continue
+polling during `pending`, `downloading`, `validating`, `retry_wait`, `ready`,
+and `processing`. The response can include `downloaded_bytes`, `total_bytes`,
+and `processing_percentage`. On `failed` or `cancelled`, stop polling.
+For failures, check `media_import.error.code`
+and `media_import.error.retryable`. For example, `insufficient_minutes` can
+appear after acceptance, once mymeet knows the recording duration.
+
+When the phase is `completed`, [fetch the result](#get-meeting-json). For a split
+recording, `new` or `processed` in the meeting `status` can mean that just the
+first part is ready. The report lists part IDs in `followup_v2.part.meetings`.
+Fetch each part by its ID. On the API Transcript plan, read the transcript in
+`followup_v2.chapters`.
 
 ## Webhooks
 
@@ -290,7 +354,7 @@ meeting):
 
 | Field | Meaning |
 |---|---|
-| `group_meeting_id` | The original `meeting_id` — the one `POST /api/record-meeting` / `POST /api/video` returned. The same for every part. |
+| `group_meeting_id` | The `meeting_id` returned when creating the meeting. The same for every part. |
 | `index` | Number of this part, from 1. |
 | `total` | How many parts the recording was split into. |
 | `meetings` | Report only: every part created so far in this workspace — `meeting_id`, `index`, `status`, `title` — ordered by `index`. |
@@ -346,8 +410,12 @@ async def hook(request: Request):
 
 ### Without webhooks
 
-Poll `GET /api/meeting/status` on the original id until it leaves
-`processing`, then read `part` from its `GET /api/video/report` response.
+For link imports, follow `media_import.phase` as described in
+[Import a recording from a link](#import-a-recording-from-a-link).
+
+For bot recordings and file uploads, poll `GET /api/meeting/status` on the
+original id until it leaves `processing`, then read `part` from its
+`GET /api/video/report` response.
 `part.meetings` lists the parts created so far and grows until it reaches
 `part.total`; a part that is still being processed is listed with
 `"status": "processing"`:

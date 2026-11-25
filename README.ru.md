@@ -3,8 +3,8 @@
 [English](README.md) | **Русский**
 
 Официальная документация и примеры кода публичного API [mymeet.ai](https://mymeet.ai):
-отправляйте бота записывать онлайн-встречи, загружайте аудио/видео файлы и получайте
-AI-отчёты, транскрипты и фоллоу-апы.
+отправляйте бота записывать онлайн-встречи, загружайте аудио и видео, импортируйте
+записи по ссылкам и получайте AI-отчёты, транскрипты и фоллоу-апы.
 
 - 📘 Полный интерактивный справочник API: https://backend.mymeet.ai/docs/
 - 🐍 Python-примеры для каждого эндпоинта: [`test_api.py`](test_api.py)
@@ -54,6 +54,7 @@ print(response.text)
 |---|---|---|
 | POST | [`/api/record-meeting`](#запись-онлайн-встречи) | Отправить бота записать онлайн-встречу |
 | POST | [`/api/video`](#загрузка-файла) | Загрузить аудио/видео файл |
+| POST | [`/api/video/import-link`](#импорт-записи-по-ссылке) | Импортировать запись с YouTube, Яндекс Диска или Google Drive |
 | GET | [`/api/workspaces/active/all-meetings`](#список-встреч) | Список встреч воркспейса |
 | GET | [`/api/meeting/status`](#статус-встречи) | Статус встречи (одной или пачкой) |
 | GET | [`/api/video/report`](#отчёт-по-встрече-json) | Полный отчёт по встрече в JSON |
@@ -161,6 +162,72 @@ print(response.json())  # {"meeting_id": ..., "user_id": ...}
   новый `upload_session_id` на каждую полную попытку загрузки.
 - Поля `expected_file_size` / `expected_sha256` включают сквозную проверку
   целостности до создания встречи.
+
+## Импорт записи по ссылке
+
+`POST /api/video/import-link`
+
+Передайте HTTPS-ссылку на один ролик YouTube или один аудио- или видеофайл на
+Яндекс Диске или Google Drive. Запись должна быть доступна без входа в аккаунт,
+а для файла должно быть разрешено скачивание. Папки, плейлисты и прямые эфиры
+не поддерживаются.
+
+Передайте `X-API-KEY` и UUID в `Idempotency-Key`. При повторе того же запроса
+в том же воркспейсе, в том числе после таймаута, используйте исходный UUID.
+Ответ вернёт тот же `meeting_id`. Если с тем же UUID отправить другую ссылку
+или другие настройки обработки, API вернёт `409 idempotency_conflict`.
+
+```python
+import uuid
+
+import_key = str(uuid.uuid4())  # Сохраните ключ до отправки запроса.
+response = requests.post(
+    "https://backend.mymeet.ai/api/video/import-link",
+    headers={**headers, "Idempotency-Key": import_key},
+    json={"url": "YOUR_PUBLIC_RECORDING_URL", "speakers_number": 0},
+    timeout=30,
+)
+response.raise_for_status()
+meeting_id = response.json()["meeting_id"]
+```
+
+Необязательный `speakers_number` задаёт число спикеров. Укажите `0` для
+автоопределения или число от `1` до `50`. Шаблон отчёта можно выбрать через
+`template_name`.
+
+Ответ `202 Accepted` содержит `meeting_id`, `source` (`youtube`, `yandex_disk`
+или `google_drive`) и текущий `status` встречи. Импорт продолжается в фоне.
+Проверяйте [статус в JSON](#статус-встречи) через `meeting_ids`, даже если
+импорт один.
+
+```python
+response = requests.get(
+    "https://backend.mymeet.ai/api/meeting/status",
+    headers=headers,
+    params={"meeting_ids": meeting_id},
+    timeout=30,
+)
+response.raise_for_status()
+entry = response.json()["statuses"][meeting_id]
+if "error" in entry:
+    raise RuntimeError(entry["error"])  # not_found или forbidden
+print(entry["media_import"])
+```
+
+За состоянием всей записи следите по `media_import.phase` исходной встречи.
+Продолжайте проверять статус в фазах `pending`, `downloading`, `validating`,
+`retry_wait`, `ready` и `processing`. В ответе могут быть `downloaded_bytes`,
+`total_bytes` и `processing_percentage`. В фазах `failed` и `cancelled`
+прекратите опрос. При ошибке проверьте `media_import.error.code` и
+`media_import.error.retryable`. Например,
+`insufficient_minutes` может появиться после принятия запроса, когда mymeet
+определит длительность записи.
+
+В фазе `completed` [получите результат](#отчёт-по-встрече-json). Если запись
+разбита на части, `new` или `processed` в поле `status` может означать готовность
+только первой части. Список ID частей находится в `followup_v2.part.meetings`
+в отчёте. Получите каждую часть по её ID. На тарифе API Транскрипт читайте
+транскрипт в `followup_v2.chapters`.
 
 ## Вебхуки
 
@@ -289,7 +356,7 @@ X-Mymeet-Signature: sha256=<hex>   (только при заданном webhook
 
 | Поле | Значение |
 |---|---|
-| `group_meeting_id` | Исходный `meeting_id` — тот, что вернул `POST /api/record-meeting` / `POST /api/video`. Один у всех частей. |
+| `group_meeting_id` | `meeting_id`, который вернул запрос на создание встречи. Один у всех частей. |
 | `index` | Номер этой части, с 1. |
 | `total` | На сколько частей разрезана запись. |
 | `meetings` | Только в отчёте: все уже созданные части в этом воркспейсе — `meeting_id`, `index`, `status`, `title` — по порядку `index`. |
@@ -345,8 +412,12 @@ async def hook(request: Request):
 
 ### Без вебхуков
 
-Поллите `GET /api/meeting/status` по исходному id, пока статус не перестанет
-быть `processing`, затем читайте `part` в ответе его `GET /api/video/report`.
+Для импорта по ссылке следите за `media_import.phase` по инструкции из раздела
+[«Импорт записи по ссылке»](#импорт-записи-по-ссылке).
+
+Для записи ботом и загрузки файла проверяйте `GET /api/meeting/status` по
+исходному id, пока статус не перестанет быть `processing`, затем читайте
+`part` в ответе `GET /api/video/report`.
 `part.meetings` перечисляет уже созданные части и растёт, пока не дойдёт до
 `part.total`; часть, которая ещё обрабатывается, стоит в списке со
 `"status": "processing"`:
